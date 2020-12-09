@@ -1,27 +1,30 @@
 const express = require('express')
 const mongoose = require('mongoose')
 const session = require('express-session')
-// NEW
-const passport = require('passport')
-const LocalStrategy = require('passport-local').Strategy
+var passport = require('passport')
 var crypto = require('crypto')
-// ---
+var routes = require('./routes')
+const connection = require('./config/db')
 
+// Package documentation - https://www.npmjs.com/package/connect-mongo
 const MongoStore = require('connect-mongo')(session)
+
+/**
+ * -------------- GENERAL SETUP ----------------
+ */
+
+// Gives us access to variables set in the .env file via `process.env.VARIABLE_NAME` syntax
 require('dotenv').config()
+
+// Create the Express application
 var app = express()
-const connection = mongoose.createConnection(process.env.DB_URI, {
-  useNewUrlParser: true,
-  useUnifiedTopology: true
-})
 
-const UserSchema = new mongoose.Schema({
-  username: String,
-  hash: String,
-  salt: String
-})
+app.use(express.json())
+app.use(express.urlencoded({ extended: true }))
 
-mongoose.model('User', UserSchema)
+/**
+ * -------------- SESSION SETUP ----------------
+ */
 
 const sessionStore = new MongoStore({ mongooseConnection: connection, collection: 'sessions' })
 
@@ -30,90 +33,39 @@ app.use(
     secret: process.env.SECRET,
     resave: false,
     saveUninitialized: true,
-    store: sessionStore
-  })
-)
-
-// NEW
-// START PASSPORT
-function validPassword(password, hash, salt) {
-  var hashVerify = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex')
-  return hash === hashVerify
-}
-
-function genPassword(password) {
-  var salt = crypto.randomBytes(32).toString('hex')
-  var genHash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex')
-
-  return {
-    salt: salt,
-    hash: genHash
-  }
-}
-
-passport.use(
-  new LocalStrategy(function (username, password, cb) {
-    User.findOne({ username: username })
-      .then(user => {
-        if (!user) {
-          return cb(null, false)
-        }
-
-        // Function defined at bottom of app.js
-        const isValid = validPassword(password, user.hash, user.salt)
-
-        if (!isValid) {
-          return cb(null, false)
-        } else {
-          return cb(null, user)
-        }
-      })
-      .catch(err => {
-        cb(err)
-      })
-  })
-)
-
-passport.serializeUser(function (user, cb) {
-  cb(null, user.id)
-})
-
-passport.deserializeUser(function (id, cb) {
-  User.findById(id, function (err, user) {
-    if (err) {
-      return cb(err)
+    store: sessionStore,
+    cookie: {
+      maxAge: 1000 * 60 * 60 * 24 // Equals 1 day (1 day * 24 hr/1 day * 60 min/1 hr * 60 sec/1 min * 1000 ms / 1 sec)
     }
-    cb(null, user)
   })
-})
+)
+
+/**
+ * -------------- PASSPORT AUTHENTICATION ----------------
+ */
+
+// Need to require the entire Passport config module so app.js knows about it
+require('./config/passport')
 
 app.use(passport.initialize())
 app.use(passport.session())
 
-// ---
-// END PASSPORT
-
-app.get('/', (req, res, next) => {
-  res.send('<h1>Welcome home bitch</h1>')
+app.use((req, res, next) => {
+  console.log(req.session)
+  console.log(req.user)
+  next()
 })
 
-app.get('/login', (req, res, next) => {
-  res.send('<h1>Login Page</h1>')
-})
+/**
+ * -------------- ROUTES ----------------
+ */
 
-app.post(
-  '/login',
-  passport.authenticate('local', { failureRedirect: '/login' }),
-  (err, req, res, next) => {
-    if (err) next(err)
-    console.log('You are logged in!')
-  }
-)
+// Imports all of the routes from ./routes/index.js
+app.use(routes)
 
-app.get('/register', (req, res, next) => {
-  res.send('<h1>Register Page</h1>')
-})
+/**
+ * -------------- SERVER ----------------
+ */
 
-app.post('/register', (req, res, next) => {})
-
+// Server listens on http://localhost:3000
 app.listen(3000)
